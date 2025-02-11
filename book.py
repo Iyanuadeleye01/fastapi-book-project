@@ -1,13 +1,13 @@
+
+
 from typing import OrderedDict
 
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 
 from api.db.schemas import Book, Genre, InMemoryDB
-from fastapi import FastAPI, HTTPException
 
 router = APIRouter()
-
 
 db = InMemoryDB()
 db.books = {
@@ -71,3 +71,16 @@ async def get_book(book_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
         )
     return book
+
+
+
+
+
+
+
+
+
+
+
+
+
