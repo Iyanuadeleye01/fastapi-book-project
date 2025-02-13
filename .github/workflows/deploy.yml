@@ -32,7 +32,7 @@ jobs:
             fi
             cd /home/ubuntu/your_project
 
-            # Pull latest changes
+            # Use Pull latest changes
             git pull origin main
 
             # Stop and remove the old container
