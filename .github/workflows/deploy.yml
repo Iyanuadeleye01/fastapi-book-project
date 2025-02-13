@@ -2,17 +2,51 @@ name: CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main  # Runs only when a PR is merged into main
 
 jobs:
   deploy:
+    name: deploy  # Job name must be exactly "deploy"
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v2
 
-      - name: Build Docker image
-        run: docker build -t fastapi-app .
+      - name: Deploy to AWS EC2 Ubuntu Instance via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.EC2_HOST }}       # Your EC2 public IP (e.g., 16.171.62.35)
+          username: ${{ secrets.EC2_USER }}   # EC2 username (commonly "ubuntu")
+          key: ${{ secrets.EC2_SSH_KEY }}     # Your private SSH key (stored as a GitHub secret)
+          port: 22
+          script: |
+            # Update package lists and install Docker
+            sudo apt update -y
+            sudo apt install -y docker.io git nginx
 
-      - name: Run Container
-        run: docker run -d -p 8000:8000 fastapi-app
+            # Navigate to project directory (or clone if missing)
+            if [ ! -d "/home/ubuntu/your_project" ]; then
+              git clone https://github.com/yourusername/yourrepo.git /home/ubuntu/your_project
+            fi
+            cd /home/ubuntu/your_project
+
+            # Pull latest changes
+            git pull origin main
+
+            # Stop and remove the old container
+            sudo docker stop fastapi-container || true
+            sudo docker rm fastapi-container || true
+
+            # Remove the old Docker image
+            sudo docker rmi fastapi-app || true
+
+            # Rebuild the Docker image
+            sudo docker build -t fastapi-app .
+
+            # Run the new container
+            sudo docker run -d --name fastapi-container -p 8000:8000 fastapi-app
+
+            # Restart Nginx to apply changes
+            sudo systemctl restart nginx
