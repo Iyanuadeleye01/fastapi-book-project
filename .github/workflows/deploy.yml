@@ -1,52 +1,66 @@
-name: CD Pipeline
+name: Deploy
 
 on:
   push:
     branches:
-      - main  # Runs only when a PR is merged into main
+      - main
 
 jobs:
   deploy:
-    name: deploy  # Job name must be exactly "deploy"
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Deploy to AWS EC2 Ubuntu Instance via SSH
-        uses: appleboy/ssh-action@v0.1.6
+      - name: Build Docker image
+        run: |
+          docker build -t iyanu .
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Tag Docker Image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker tag iyanu ${{ secrets.DOCKER_USERNAME }}/iyanu:$IMAGE_TAG
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Push Docker Image to Docker Hub
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/iyanu:${{ env.IMAGE_TAG }}
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.3
         with:
-          host: ${{ secrets.EC2_HOST }}       # Your EC2 public IP (e.g., 16.171.62.35)
-          username: ${{ secrets.EC2_USER }}   # EC2 username (commonly "ubuntu")
-          key: ${{ secrets.EC2_SSH_KEY }}     # Your private SSH key (stored as a GitHub secret)
-          port: 22
-          script: |
-            # Update package lists and install Docker
-            sudo apt update -y
-            sudo apt install -y docker.io git nginx
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-            # Navigate to project directory (or clone if missing)
-            if [ ! -d "/home/ubuntu/your_project" ]; then
-              git clone https://github.com/yourusername/yourrepo.git /home/ubuntu/your_project
-            fi
-            cd /home/ubuntu/your_project
+      - name: Deploy to EC2
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
+            sudo usermod -aG docker $USER || true  # Add user to Docker group if not already added
+            newgrp docker || true                  # Refresh group membership
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/iyanu:${{ env.IMAGE_TAG }}
+            sudo docker stop iyanu || true
+            sudo docker rm iyanu || true
+            sudo docker run -d -p 8000:8000 --name iyanu ${{ secrets.DOCKER_USERNAME }}/iyanu:${{ env.IMAGE_TAG }}
+          EOF
 
-            # Use Pull latest changes
-            git pull origin main
+      - name: Check Deployment Health
+        run: |
+          for i in {1..10}; do
+            curl -f http://${{ secrets.DEPLOYMENT_URL }}/healthcheck && exit 0 || echo "Waiting for app..."
+            sleep 5
+          done
+          echo "App failed to start" && exit 1
 
-            # Stop and remove the old container
-            sudo docker stop fastapi-container || true
-            sudo docker rm fastapi-container || true
-
-            # Remove the old Docker image
-            sudo docker rmi fastapi-app || true
-
-            # Rebuild the Docker image
-            sudo docker build -t fastapi-app .
-
-            # Run the new container
-            sudo docker run -d --name fastapi-container -p 8000:8000 fastapi-app
-
-            # Restart Nginx to apply changes
-            sudo systemctl restart nginx
+      - name: Debug Logs on Failure
+        if: failure()
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
+            docker logs iyanu
+          EOF
