@@ -57,7 +57,7 @@ async def get_book(book_id: int) -> Book:
 
 @router.get("/{book_id}/test", status_code=status.HTTP_200_OK)
 async def get_book(book_id: int):
-    return "iyanu you are mad o are you sure this is workind - SURPRISE!!!"
+    return "What is going on JARE"
 
 
 @router.put("/{book_id}", response_model=Book, status_code=status.HTTP_200_OK)
